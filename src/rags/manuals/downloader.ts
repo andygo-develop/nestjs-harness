@@ -155,7 +155,17 @@ async function githubJson<T>(url: string): Promise<T> {
     throw new HarnessError(`GitHub returned HTTP ${response.status} for ${url}`);
   }
 
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch (cause) {
+    // A successful `fetch()` only means the headers arrived — the body is a
+    // separate stream, and a connection dropped partway through surfaces here
+    // as a bare `TypeError: terminated` with no message of its own.
+    throw new HarnessError(`Connection to GitHub was interrupted while reading the response from ${url}`, {
+      hint: 'This is usually a dropped connection. Check your network and try again.',
+      cause,
+    });
+  }
 }
 
 /** Head commit SHA of a documentation branch. */
@@ -190,7 +200,24 @@ async function downloadTarball(repository: string, branch: string, destination: 
   }
 
   await mkdir(path.dirname(destination), { recursive: true });
-  await pipeline(Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(destination));
+
+  try {
+    await pipeline(
+      Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+      createWriteStream(destination),
+    );
+  } catch (cause) {
+    // Same failure mode as the JSON read in `githubJson`, but far more likely
+    // here: this stream runs for the whole tarball, not one small response,
+    // so it has much longer to catch a mid-transfer network hiccup. Left
+    // uncaught, this reaches the user as a raw `TypeError: terminated` with
+    // an undici stack trace and no indication of what to do about it.
+    await rm(destination, { force: true });
+    throw new HarnessError(`Connection to GitHub was interrupted while downloading ${url}`, {
+      hint: 'This is usually a dropped connection or an unstable network. Check your connection and try again.',
+      cause,
+    });
+  }
 }
 
 /**

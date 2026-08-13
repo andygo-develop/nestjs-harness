@@ -15,6 +15,7 @@ import {
   fetchHeadCommit,
   readManualMeta,
   safeDocPath,
+  syncManuals,
 } from '../rags/manuals/downloader.js';
 import { cleanupTempDirs, makeTempDir } from './helpers.js';
 
@@ -180,6 +181,73 @@ describe('GitHub authentication', () => {
 
     const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer secret-token');
+  });
+});
+
+/**
+ * A successful `fetch()` only proves the response headers arrived — the body
+ * is a separate stream, and a connection dropped mid-transfer throws a bare
+ * `TypeError: terminated` with no message when that stream is read. Both call
+ * sites that read a response body must turn that into an actionable
+ * HarnessError instead of letting it escape as a raw, unexplained TypeError.
+ */
+describe('interrupted connections', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports an actionable error when the commit-lookup body is interrupted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new TypeError('terminated');
+        },
+      })),
+    );
+
+    await expect(fetchHeadCommit('nestjs/docs.nestjs.com', '11.0.0')).rejects.toThrow(
+      /Connection to GitHub was interrupted while reading the response/,
+    );
+  });
+
+  it('reports an actionable error and removes the partial file when a tarball download is interrupted', async () => {
+    const dir = await makeTempDir();
+    const cacheDir = path.join(dir, 'cache');
+    const manualDir = path.join(dir, 'manuals', 'nestjs-11.0.0');
+    const metaFile = path.join(manualDir, '.meta.json');
+
+    let call = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        call += 1;
+        if (call === 1) {
+          // fetchHeadCommit inside syncManuals — succeeds normally.
+          return { ok: true, status: 200, json: async () => ({ sha: 'abc123def456' }) };
+        }
+
+        // downloadTarball — headers arrive fine, but the body dies partway
+        // through, exactly like a dropped connection on a real download.
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]));
+            controller.error(new TypeError('terminated'));
+          },
+        });
+        return { ok: true, status: 200, body };
+      }),
+    );
+
+    await expect(
+      syncManuals({ docsLine: '11.0.0', lang: 'en', version: '11.1', manualDir, metaFile, cacheDir }),
+    ).rejects.toThrow(/Connection to GitHub was interrupted while downloading/);
+
+    // No corrupt partial tarball left behind for a retry to trip over.
+    const cacheFiles = await readdir(cacheDir).catch(() => []);
+    expect(cacheFiles).toEqual([]);
   });
 });
 
