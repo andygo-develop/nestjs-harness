@@ -1,6 +1,6 @@
 {
   "name": "@andygo.dev/nestjs-harness",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Local AI development harness for NestJS projects: version-aware manual sync, SQLite/FTS5 search, a NestJS Claude Code Skill, and an MCP server.",
   "keywords": [
     "nestjs",
