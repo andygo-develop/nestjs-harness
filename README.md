@@ -361,6 +361,52 @@ In Gemini CLI they are commands (`/nestjs:expert`, `/nestjs:code-reviewer`,
 `.cursor/commands/`; in Codex, playbook documents its `AGENTS.md` block points
 at.
 
+### Forcing a role
+
+Only `nestjs-expert`'s description says `Use PROACTIVELY`, so it is the one
+role a coding agent may reach for on its own for NestJS implementation work.
+The other three — `nestjs-planner`, `nestjs-code-reviewer`, `nestjs-test-writer`
+— only run when you ask for them by name; left unnamed, the agent is free to
+handle planning, review or tests inline itself instead of delegating.
+
+To force a specific role rather than leaving that choice to the agent, invoke
+it explicitly:
+
+- **Claude Code / OpenCode** — name the subagent in your prompt, as in the
+  examples above (`use the nestjs-code-reviewer agent to review this`). Naming
+  it dispatches the whole task to that subagent instead of the top-level agent
+  answering inline.
+- **Gemini CLI** — run its command directly: `/nestjs:expert`,
+  `/nestjs:planner`, `/nestjs:code-reviewer`, `/nestjs:test-writer`.
+- **Cursor** — run the matching command from `.cursor/commands/`.
+- **Codex** — there is no separate role to invoke. Its playbook is folded into
+  the ambient `AGENTS.md` block and applies on every turn, so there is nothing
+  to force on.
+
+Those are all per-prompt. For a standing rule, edit `CLAUDE.md` — the harness
+never writes to it (Claude Code's guidance lives in `.claude/skills/nestjs/`
+and `.claude/agents/*.md` instead, see the layout above), so it is a clean
+place to add project-wide delegation policy without colliding with anything
+`skill update`/`agent update` maintain. For example:
+
+```markdown
+## Subagent policy
+
+- Always use the nestjs-code-reviewer subagent to review NestJS changes
+  before reporting a task done.
+- Always use the nestjs-test-writer subagent when adding or fixing tests
+  for NestJS code.
+```
+
+That turns delegation into the default for that kind of work project-wide,
+instead of something asked for each time — effectively a project-scoped
+`Use PROACTIVELY` for a role that doesn't carry it by default. The same idea
+applies to the other targets' own ambient files (`AGENTS.md` for Codex/
+OpenCode, `GEMINI.md` for Gemini CLI, `.cursor/rules/` for Cursor) — but
+those already carry a harness-managed block, so add project-specific policy
+like this outside of it, not inside the marked-off section `agent
+update`/`skill update` own.
+
 All four share one defining rule: **verify framework APIs against the
 documentation before asserting them**. For the expert that means searching
 before writing; for the planner it means grounding implementation steps in this
